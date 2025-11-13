@@ -3,10 +3,12 @@
 
 """OSCD datamodule."""
 
+from collections.abc import Callable
 from typing import Any
 
 import kornia.augmentation as K
 import torch
+from torch import Tensor
 from torch.utils.data import random_split
 
 from ..datasets import OSCD
@@ -44,6 +46,43 @@ STD = {
     'B11': 984.9249267578125,
     'B12': 844.7711181640625,
 }
+
+
+class _UnbatchedVideoTransform:
+    """Wrapper to apply VideoSequential transforms to unbatched samples.
+
+    VideoSequential expects inputs with shape [B, T, C, H, W], but dataset
+    __getitem__ returns unbatched samples [T, C, H, W]. This wrapper adds
+    a batch dimension, applies the transform, then removes it.
+    """
+
+    def __init__(
+        self, transform: Callable[[dict[str, Tensor]], dict[str, Tensor]]
+    ) -> None:
+        """Initialize the wrapper.
+
+        Args:
+            transform: A transform that expects batched inputs.
+        """
+        self.transform = transform
+
+    def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
+        """Apply the transform to an unbatched sample.
+
+        Args:
+            sample: Unbatched sample dict with 'image' and 'mask' keys.
+
+        Returns:
+            Transformed unbatched sample.
+        """
+        # Add batch dimension
+        batched_sample = {k: v.unsqueeze(0) for k, v in sample.items()}
+
+        # Apply transform
+        transformed = self.transform(batched_sample)
+
+        # Remove batch dimension
+        return {k: v.squeeze(0) for k, v in transformed.items()}
 
 
 class OSCDDataModule(NonGeoDataModule):
@@ -96,20 +135,22 @@ class OSCDDataModule(NonGeoDataModule):
             stage: Either 'fit', 'validate', 'test', or 'predict'.
         """
         if stage in ['fit', 'validate']:
-            transforms = K.AugmentationSequential(
+            crop_aug = K.AugmentationSequential(
                 K.VideoSequential(K.RandomCrop(self.patch_size)),
                 data_keys=None,
                 keepdim=True,
             )
+            transforms = _UnbatchedVideoTransform(crop_aug)
             self.dataset = OSCD(split='train', transforms=transforms, **self.kwargs)
             generator = torch.Generator().manual_seed(0)
             self.train_dataset, self.val_dataset = random_split(
                 self.dataset, [1 - self.val_split_pct, self.val_split_pct], generator
             )
         if stage in ['test']:
-            transforms = K.AugmentationSequential(
+            crop_aug = K.AugmentationSequential(
                 K.VideoSequential(K.CenterCrop(self.patch_size)),
                 data_keys=None,
                 keepdim=True,
             )
+            transforms = _UnbatchedVideoTransform(crop_aug)
             self.test_dataset = OSCD(split='test', transforms=transforms, **self.kwargs)
