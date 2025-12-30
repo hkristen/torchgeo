@@ -111,6 +111,12 @@ GlobBiomass
 
 .. autoclass:: GlobBiomass
 
+HabitAlp2
+^^^^^^^^^
+
+.. autoclass:: HabitAlp2
+.. autoclass:: HabitAlp2CD
+
 iNaturalist
 ^^^^^^^^^^^
 

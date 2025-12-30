@@ -36,6 +36,11 @@ NAIP
 
 .. autoclass:: NAIPChesapeakeDataModule
 
+HabitAlp2
+^^^^^^^^^
+
+.. autoclass:: HabitAlp2DataModule
+
 I/O Bench
 ^^^^^^^^^
 
