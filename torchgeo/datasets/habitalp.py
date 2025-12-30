@@ -7,8 +7,10 @@ import os
 from collections.abc import Callable, Sequence
 from typing import Any, ClassVar
 
+import einops
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from matplotlib.colors import ListedColormap
 from matplotlib.figure import Figure
 from pyproj import CRS
@@ -16,7 +18,13 @@ from torch import Tensor
 
 from .errors import DatasetNotFoundError
 from .geo import GeoDataset, RasterDataset
-from .utils import GeoSlice, Path, download_url, percentile_normalization
+from .utils import (
+    GeoSlice,
+    Path,
+    download_url,
+    draw_semantic_segmentation_masks,
+    percentile_normalization,
+)
 
 
 class HabitAlp2RGB(RasterDataset):
@@ -577,6 +585,500 @@ class HabitAlp2(GeoDataset):
             axs[2].axis('off')
             if show_titles:
                 axs[2].set_title('Prediction')
+
+        if suptitle is not None:
+            plt.suptitle(suptitle)
+
+        return fig
+
+
+class HabitAlp2ChangeMask(RasterDataset):
+    """Change detection mask component for HabitAlp2 dataset."""
+
+    is_image = False
+
+
+class HabitAlp2CD(GeoDataset):
+    """HabitAlp2 dataset for change detection.
+
+    The `HabitAlp2 <https://huggingface.co/datasets/JR-DIGITAL/habitalp2.0>`__ dataset
+    is an ecological habitat mapping dataset for the Gesäuse National Park in Austria,
+    covering approximately 154 km² with 30,241 annotated polygons.
+
+    This class provides access to the change detection task, with bi-temporal image
+    pairs and binary change masks.
+
+    Dataset features:
+
+    * RGB and CIR aerial orthophotos
+    * LiDAR-derived terrain layers (DTM, DSM, nDSM, slope, aspect, etc.)
+    * Binary change detection masks
+    * Two temporal pairs: 2003→2013 and 2013→2020
+
+    Dataset format:
+
+    * images are multi-band GeoTIFFs
+    * masks are single-band GeoTIFFs with 0=no change, 1=change
+
+    If you use this dataset in your research, please cite the following paper:
+
+    * https://doi.org/10.48550/arXiv.2511.00073
+
+    .. versionadded:: 0.8
+    """
+
+    url = 'https://huggingface.co/datasets/JR-DIGITAL/habitalp2.0/resolve/main/'
+
+    valid_pairs: ClassVar[tuple[str, ...]] = ('2003_2013', '2013_2020')
+
+    all_bands: ClassVar[tuple[str, ...]] = (
+        'R',
+        'G',
+        'B',
+        'NIR',
+        'dtm',
+        'dsm',
+        'ndsm',
+        'slope',
+        'aspect',
+        'curvature',
+        'planform_curvature',
+        'profile_curvature',
+        'roughness_terrain',
+        'roughness_canopy',
+        'tpi',
+        'tri',
+    )
+
+    rgb_bands: ClassVar[tuple[str, ...]] = ('R', 'G', 'B')
+
+    data_files: ClassVar[dict[str, dict[str, str]]] = HabitAlp2.data_files
+
+    change_mask_files: ClassVar[dict[str, str]] = {
+        '2003_2013': 'labels/habitalp_change_2003_2013.tif',
+        '2013_2020': 'labels/habitalp_change_2013_2020.tif',
+    }
+
+    colormap: ClassVar[tuple[str, ...]] = ('blue',)
+
+    def __init__(
+        self,
+        root: Path = 'data',
+        crs: CRS | None = None,
+        res: float | tuple[float, float] | None = None,
+        pair: str = '2013_2020',
+        bands: Sequence[str] | None = None,
+        transforms: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        cache: bool = True,
+        download: bool = False,
+        checksum: bool = False,
+    ) -> None:
+        """Initialize a new HabitAlp2CD dataset instance.
+
+        Args:
+            root: root directory where dataset can be found
+            crs: :term:`CRS` to warp to (defaults to CRS of first file found)
+            res: resolution in units of CRS (defaults to resolution of first file)
+            pair: one of "2003_2013" or "2013_2020"
+            bands: bands to load (defaults to RGB only)
+            transforms: a function/transform that takes input sample and returns
+                a transformed version
+            cache: if True, cache file handle to speed up repeated sampling
+            download: if True, download dataset and store it in the root directory
+            checksum: if True, check the MD5 of the downloaded files (may be slow)
+
+        Raises:
+            AssertionError: if ``pair`` or ``bands`` arguments are invalid
+            DatasetNotFoundError: If dataset is not found and *download* is False.
+        """
+        assert pair in self.valid_pairs, f'pair must be one of {self.valid_pairs}'
+
+        super().__init__()
+
+        self.root = root
+        self.pair = pair
+        self.download = download
+        self.checksum = checksum
+        self.transforms = transforms
+
+        self.year1, self.year2 = pair.split('_')
+
+        available_bands = self._get_available_bands()
+        if bands is None:
+            bands = ('R', 'G', 'B')
+
+        for band in bands:
+            assert band in available_bands, (
+                f"Band '{band}' not available for pair {pair}. "
+                f'Available bands: {available_bands}'
+            )
+
+        self.bands = bands
+
+        self._verify()
+
+        self.dataset1 = self._build_image_dataset(self.year1, crs, res, cache)
+        self.dataset2 = self._build_image_dataset(self.year2, crs, res, cache)
+
+        mask_path = os.path.join(root, self.change_mask_files[pair])
+        self.mask_ds = HabitAlp2ChangeMask(mask_path, crs=crs, res=res, cache=cache)
+
+        self.dataset = self.dataset1 & self.dataset2 & self.mask_ds
+
+        self._crs = self.dataset.crs
+        self._res = self.dataset.res
+        self.index = self.dataset.index
+
+    def _build_image_dataset(
+        self,
+        year: str,
+        crs: CRS | None,
+        res: float | tuple[float, float] | None,
+        cache: bool,
+    ) -> GeoDataset:
+        """Build the image dataset for a given year.
+
+        Args:
+            year: the year to build the dataset for
+            crs: CRS to warp to
+            res: resolution in units of CRS
+            cache: whether to cache file handles
+
+        Returns:
+            the image GeoDataset for the year
+        """
+        year_files = self.data_files[year]
+
+        needs_rgb = any(b in ['R', 'G', 'B'] for b in self.bands)
+        needs_cir = 'NIR' in self.bands
+
+        image_datasets: list[GeoDataset] = []
+
+        if needs_rgb and 'rgb' in year_files:
+            rgb_path = os.path.join(self.root, year_files['rgb'])
+            rgb_ds = HabitAlp2RGB(rgb_path, crs=crs, res=res, cache=cache)
+            image_datasets.append(rgb_ds)
+
+        if needs_cir and 'cir' in year_files:
+            cir_path = os.path.join(self.root, year_files['cir'])
+            cir_ds = HabitAlp2CIR(
+                cir_path, crs=crs, res=res, bands=('NIR',), cache=cache
+            )
+            image_datasets.append(cir_ds)
+
+        terrain_bands = [
+            'dtm',
+            'dsm',
+            'ndsm',
+            'slope',
+            'aspect',
+            'curvature',
+            'planform_curvature',
+            'profile_curvature',
+            'roughness_terrain',
+            'roughness_canopy',
+            'tpi',
+            'tri',
+        ]
+        for band in terrain_bands:
+            if band in self.bands and band in year_files:
+                terrain_path = os.path.join(self.root, year_files[band])
+                terrain_ds = HabitAlp2Terrain(
+                    terrain_path, crs=crs, res=res, cache=cache
+                )
+                image_datasets.append(terrain_ds)
+
+        image_ds: GeoDataset = image_datasets[0]
+        for ds in image_datasets[1:]:
+            image_ds = image_ds & ds
+
+        return image_ds
+
+    @property
+    def crs(self) -> CRS:
+        """Return the CRS of the dataset.
+
+        Returns:
+            The coordinate reference system of the dataset.
+        """
+        return self._crs
+
+    @crs.setter
+    def crs(self, value: CRS) -> None:
+        """Set the CRS of the dataset.
+
+        Args:
+            value: The new CRS value.
+        """
+        self._crs = value
+
+    @property
+    def res(self) -> tuple[float, float]:
+        """Return the resolution of the dataset.
+
+        Returns:
+            The resolution as (x, y) tuple.
+        """
+        return self._res
+
+    @res.setter
+    def res(self, new_res: float | tuple[float, float]) -> None:
+        """Set the resolution of the dataset.
+
+        Args:
+            new_res: The new resolution value.
+        """
+        if isinstance(new_res, int | float):
+            new_res = (new_res, new_res)
+        self._res = new_res
+
+    def _get_available_bands(self) -> tuple[str, ...]:
+        """Get available bands for the current pair.
+
+        Returns:
+            tuple of available band names
+        """
+        available_year1 = set(self._get_year_bands(self.year1))
+        available_year2 = set(self._get_year_bands(self.year2))
+        return tuple(available_year1 & available_year2)
+
+    def _get_year_bands(self, year: str) -> tuple[str, ...]:
+        """Get available bands for a given year.
+
+        Args:
+            year: the year to check
+
+        Returns:
+            tuple of available band names
+        """
+        available = []
+        year_files = self.data_files[year]
+
+        if 'rgb' in year_files:
+            available.extend(['R', 'G', 'B'])
+        if 'cir' in year_files:
+            available.append('NIR')
+
+        terrain_bands = [
+            'dtm',
+            'dsm',
+            'ndsm',
+            'slope',
+            'aspect',
+            'curvature',
+            'planform_curvature',
+            'profile_curvature',
+            'roughness_terrain',
+            'roughness_canopy',
+            'tpi',
+            'tri',
+        ]
+        for band in terrain_bands:
+            if band in year_files:
+                available.append(band)
+
+        return tuple(available)
+
+    def _get_file_paths(self) -> list[str]:
+        """Get the paths to files based on selected bands and pair.
+
+        Returns:
+            list of file paths
+        """
+        paths = []
+
+        for year in [self.year1, self.year2]:
+            year_files = self.data_files[year]
+
+            needs_rgb = any(b in ['R', 'G', 'B'] for b in self.bands)
+            needs_cir = 'NIR' in self.bands
+
+            if needs_rgb and 'rgb' in year_files:
+                paths.append(os.path.join(self.root, year_files['rgb']))
+
+            if needs_cir and 'cir' in year_files:
+                paths.append(os.path.join(self.root, year_files['cir']))
+
+            terrain_bands = [
+                'dtm',
+                'dsm',
+                'ndsm',
+                'slope',
+                'aspect',
+                'curvature',
+                'planform_curvature',
+                'profile_curvature',
+                'roughness_terrain',
+                'roughness_canopy',
+                'tpi',
+                'tri',
+            ]
+            for band in terrain_bands:
+                if band in self.bands and band in year_files:
+                    paths.append(os.path.join(self.root, year_files[band]))
+
+        paths.append(os.path.join(self.root, self.change_mask_files[self.pair]))
+        return paths
+
+    def __getitem__(self, query: GeoSlice) -> dict[str, Any]:
+        """Retrieve bi-temporal image pair and change mask indexed by query.
+
+        Args:
+            query: [xmin:xmax:xres, ymin:ymax:yres, tmin:tmax:tres] coordinates to index
+
+        Returns:
+            sample containing image (T, C, H, W) and mask (1, H, W) at that index
+
+        Raises:
+            IndexError: if query is not found in the index
+        """
+        sample1 = self.dataset1[query]
+        sample2 = self.dataset2[query]
+        mask_sample = self.mask_ds[query]
+
+        image1 = sample1['image'].float()
+        image2 = sample2['image'].float()
+        image = torch.stack([image1, image2], dim=0)
+
+        mask = mask_sample['mask'].long()
+        if mask.ndim == 2:
+            mask = einops.rearrange(mask, 'h w -> () h w')
+        elif mask.ndim == 3 and mask.shape[0] != 1:
+            mask = mask[:1]
+
+        sample: dict[str, Any] = {
+            'image': image,
+            'mask': mask,
+            'crs': sample1['crs'],
+            'bounds': sample1['bounds'],
+        }
+
+        if self.transforms is not None:
+            sample['image'] = sample['image'].unsqueeze(0)
+            sample['mask'] = sample['mask'].unsqueeze(0)
+            sample = self.transforms(sample)
+            sample['image'] = sample['image'].squeeze(0)
+            sample['mask'] = sample['mask'].squeeze(0)
+
+        return sample
+
+    def _verify(self) -> None:
+        """Verify the integrity of the dataset."""
+        paths_to_check = self._get_file_paths()
+
+        exists = [os.path.exists(p) for p in paths_to_check]
+
+        if all(exists):
+            return
+
+        if not self.download:
+            raise DatasetNotFoundError(self)
+
+        self._download()
+
+    def _download(self) -> None:
+        """Download the dataset."""
+        os.makedirs(self.root, exist_ok=True)
+        os.makedirs(os.path.join(self.root, f'data_{self.year1}'), exist_ok=True)
+        os.makedirs(os.path.join(self.root, f'data_{self.year2}'), exist_ok=True)
+        os.makedirs(os.path.join(self.root, 'labels'), exist_ok=True)
+
+        for year in [self.year1, self.year2]:
+            year_files = self.data_files[year]
+            needs_rgb = any(b in ['R', 'G', 'B'] for b in self.bands)
+            needs_cir = 'NIR' in self.bands
+
+            if needs_rgb and 'rgb' in year_files:
+                filepath = os.path.join(self.root, year_files['rgb'])
+                if not os.path.exists(filepath):
+                    download_url(
+                        self.url + year_files['rgb'], self.root, year_files['rgb']
+                    )
+
+            if needs_cir and 'cir' in year_files:
+                filepath = os.path.join(self.root, year_files['cir'])
+                if not os.path.exists(filepath):
+                    download_url(
+                        self.url + year_files['cir'], self.root, year_files['cir']
+                    )
+
+            terrain_bands = [
+                'dtm',
+                'dsm',
+                'ndsm',
+                'slope',
+                'aspect',
+                'curvature',
+                'planform_curvature',
+                'profile_curvature',
+                'roughness_terrain',
+                'roughness_canopy',
+                'tpi',
+                'tri',
+            ]
+            for band in terrain_bands:
+                if band in self.bands and band in year_files:
+                    filepath = os.path.join(self.root, year_files[band])
+                    if not os.path.exists(filepath):
+                        download_url(
+                            self.url + year_files[band], self.root, year_files[band]
+                        )
+
+        mask_file = self.change_mask_files[self.pair]
+        mask_path = os.path.join(self.root, mask_file)
+        if not os.path.exists(mask_path):
+            download_url(self.url + mask_file, self.root, mask_file)
+
+    def plot(
+        self,
+        sample: dict[str, Tensor],
+        show_titles: bool = True,
+        suptitle: str | None = None,
+        alpha: float = 0.5,
+    ) -> Figure:
+        """Plot a sample from the dataset.
+
+        Args:
+            sample: a sample returned by :meth:`__getitem__`
+            show_titles: flag indicating whether to show titles above each panel
+            suptitle: optional string to use as a suptitle
+            alpha: opacity with which to render change mask overlay
+
+        Returns:
+            a matplotlib Figure with the rendered sample
+        """
+        ncols = 2
+
+        def get_rgb_image(img: Tensor) -> 'np.typing.NDArray[np.uint8]':
+            rgb_img = img[:3].float().numpy()
+            rgb_img = np.transpose(rgb_img, (1, 2, 0))
+            rgb_img = percentile_normalization(rgb_img, axis=(0, 1))
+            rgb_img = np.clip(rgb_img, 0, 1)
+            rgb_img = (rgb_img * 255).astype(np.uint8)
+            return rgb_img
+
+        def get_masked(img: Tensor, mask: Tensor) -> 'np.typing.NDArray[np.uint8]':
+            rgb_img = get_rgb_image(img)
+            array: np.typing.NDArray[np.uint8] = draw_semantic_segmentation_masks(
+                torch.from_numpy(np.transpose(rgb_img, (2, 0, 1))),
+                mask.squeeze(0),
+                alpha=alpha,
+                colors=list(self.colormap),
+            )
+            return array
+
+        image1 = get_masked(sample['image'][0], sample['mask'])
+        image2 = get_masked(sample['image'][1], sample['mask'])
+
+        fig, axs = plt.subplots(ncols=ncols, figsize=(ncols * 5, 5))
+        axs[0].imshow(image1)
+        axs[0].axis('off')
+        axs[1].imshow(image2)
+        axs[1].axis('off')
+
+        if show_titles:
+            axs[0].set_title(f'Pre change ({self.year1})')
+            axs[1].set_title(f'Post change ({self.year2})')
 
         if suptitle is not None:
             plt.suptitle(suptitle)

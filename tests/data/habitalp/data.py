@@ -66,6 +66,15 @@ def generate_mask(path: str) -> None:
         src.write(data)
 
 
+def generate_change_mask(path: str) -> None:
+    """Generate fake binary change detection mask GeoTIFF."""
+    p = profile.copy()
+    p['count'] = 1
+    data = np.random.randint(0, 2, size=(1, SIZE, SIZE), dtype=np.uint8)
+    with rasterio.open(path, mode='w', **p) as src:
+        src.write(data)
+
+
 if __name__ == '__main__':
     terrain_layers = [
         'dtm',
@@ -102,3 +111,6 @@ if __name__ == '__main__':
     generate_mask('labels/classes_2003.tif')
     generate_mask('labels/classes_2013.tif')
     generate_mask('labels/classes_2020.tif')
+
+    generate_change_mask('labels/habitalp_change_2003_2013.tif')
+    generate_change_mask('labels/habitalp_change_2013_2020.tif')

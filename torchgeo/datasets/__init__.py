@@ -89,7 +89,7 @@ from .geo import (
 from .geonrw import GeoNRW
 from .gid15 import GID15
 from .globbiomass import GlobBiomass
-from .habitalp import HabitAlp2
+from .habitalp import HabitAlp2, HabitAlp2CD
 from .hyspecnet import HySpecNet11k
 from .idtrees import IDTReeS
 from .inaturalist import INaturalist
@@ -280,6 +280,7 @@ __all__ = (
     'GlobBiomass',
     'GlobalBuildingMap',
     'HabitAlp2',
+    'HabitAlp2CD',
     'HySpecNet11k',
     'IDTReeS',
     'INaturalist',
