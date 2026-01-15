@@ -6,10 +6,11 @@
 import os
 import re
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, ClassVar
+from typing import ClassVar
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import rasterio
 import torch
 from matplotlib.figure import Figure
 from pyproj import CRS
@@ -17,7 +18,7 @@ from torch import Tensor
 
 from .errors import DatasetNotFoundError, RGBBandsMissingError
 from .geo import RasterDataset
-from .utils import GeoSlice, Path, which
+from .utils import GeoSlice, Path, Sample, which
 
 
 class AgriFieldNet(RasterDataset):
@@ -129,7 +130,7 @@ class AgriFieldNet(RasterDataset):
         crs: CRS | None = None,
         classes: list[int] = list(cmap.keys()),
         bands: Sequence[str] = all_bands,
-        transforms: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
+        transforms: Callable[[Sample], Sample] | None = None,
         cache: bool = True,
         download: bool = False,
     ) -> None:
@@ -172,7 +173,7 @@ class AgriFieldNet(RasterDataset):
             self.ordinal_map[k] = v
             self.ordinal_cmap[v] = torch.tensor(self.cmap[k])
 
-    def __getitem__(self, query: GeoSlice) -> dict[str, Any]:
+    def __getitem__(self, query: GeoSlice) -> Sample:
         """Retrieve input, target, and/or metadata indexed by spatiotemporal slice.
 
         Args:
@@ -225,11 +226,12 @@ class AgriFieldNet(RasterDataset):
         mask = self._merge_files(mask_filepaths, query)
         mask = self.ordinal_map[mask.squeeze().long()]
 
+        transform = rasterio.transform.from_origin(x.start, y.stop, x.step, y.step)
         sample = {
-            'crs': self.crs,
-            'bounds': query,
+            'bounds': self._slice_to_tensor(query),
             'image': image.float(),
             'mask': mask.long(),
+            'transform': torch.tensor(transform),
         }
 
         if self.transforms is not None:
@@ -258,10 +260,7 @@ class AgriFieldNet(RasterDataset):
         azcopy('sync', f'{self.url}', self.paths, '--recursive=true')
 
     def plot(
-        self,
-        sample: dict[str, Tensor],
-        show_titles: bool = True,
-        suptitle: str | None = None,
+        self, sample: Sample, show_titles: bool = True, suptitle: str | None = None
     ) -> Figure:
         """Plot a sample from the dataset.
 

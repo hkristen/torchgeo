@@ -10,6 +10,7 @@ from .cabuar import CaBuArDataModule
 from .caffe import CaFFeDataModule
 from .chabud import ChaBuDDataModule
 from .chesapeake import ChesapeakeCVPRDataModule
+from .cloud_cover import CloudCoverDetectionDataModule
 from .cowc import COWCCountingDataModule
 from .cyclone import TropicalCycloneDataModule
 from .deepglobelandcover import DeepGlobeLandCoverDataModule
@@ -62,7 +63,7 @@ from .usavars import USAVarsDataModule
 from .utils import MisconfigurationException
 from .vaihingen import Vaihingen2DDataModule
 from .vhr10 import VHR10DataModule
-from .xview import XView2DataModule
+from .xbd import XView2DataModule, xBDDataModule
 
 __all__ = (
     'AgriFieldNetDataModule',
@@ -74,6 +75,7 @@ __all__ = (
     'CaFFeDataModule',
     'ChaBuDDataModule',
     'ChesapeakeCVPRDataModule',
+    'CloudCoverDetectionDataModule',
     'DeepGlobeLandCoverDataModule',
     'DigitalTyphoonDataModule',
     'ETCI2021DataModule',
@@ -134,4 +136,5 @@ __all__ = (
     'VHR10DataModule',
     'Vaihingen2DDataModule',
     'XView2DataModule',
+    'xBDDataModule',
 )
