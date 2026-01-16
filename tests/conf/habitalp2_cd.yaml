@@ -1,13 +1,15 @@
 model:
-  class_path: ChangeDetectionTask
+  class_path: torchgeo.trainers.ChangeDetectionTask
   init_args:
     model: 'unet'
     backbone: 'resnet18'
     in_channels: 3
-    loss: 'bce'
+    task: 'multiclass'
+    num_classes: 9
+    loss: 'ce'
     ignore_index: 255
 data:
-  class_path: HabitAlp2DataModule
+  class_path: torchgeo.datamodules.HabitAlp2DataModule
   init_args:
     batch_size: 2
     patch_size: 32

@@ -1,5 +1,5 @@
 model:
-  class_path: SemanticSegmentationTask
+  class_path: torchgeo.trainers.SemanticSegmentationTask
   init_args:
     model: 'unet'
     backbone: 'resnet18'
@@ -9,7 +9,7 @@ model:
     loss: 'ce'
     ignore_index: 0
 data:
-  class_path: HabitAlp2DataModule
+  class_path: torchgeo.datamodules.HabitAlp2DataModule
   init_args:
     batch_size: 2
     patch_size: 32
