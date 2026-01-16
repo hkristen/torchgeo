@@ -12,6 +12,7 @@ from rasterio.transform import Affine
 
 SIZE = 64
 NUM_CLASSES = 24
+NUM_CHANGE_CLASSES = 9
 
 np.random.seed(0)
 
@@ -67,10 +68,12 @@ def generate_mask(path: str) -> None:
 
 
 def generate_change_mask(path: str) -> None:
-    """Generate fake binary change detection mask GeoTIFF."""
+    """Generate fake multiclass change detection mask GeoTIFF."""
     p = profile.copy()
     p['count'] = 1
-    data = np.random.randint(0, 2, size=(1, SIZE, SIZE), dtype=np.uint8)
+    data = np.random.randint(
+        0, NUM_CHANGE_CLASSES, size=(1, SIZE, SIZE), dtype=np.uint8
+    )
     with rasterio.open(path, mode='w', **p) as src:
         src.write(data)
 

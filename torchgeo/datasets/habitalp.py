@@ -130,6 +130,21 @@ class HabitAlp2(GeoDataset):
 
     rgb_bands: ClassVar[tuple[str, ...]] = ('R', 'G', 'B')
 
+    terrain_bands: ClassVar[tuple[str, ...]] = (
+        'dtm',
+        'dsm',
+        'ndsm',
+        'slope',
+        'aspect',
+        'curvature',
+        'planform_curvature',
+        'profile_curvature',
+        'roughness_terrain',
+        'roughness_canopy',
+        'tpi',
+        'tri',
+    )
+
     data_files: ClassVar[dict[str, dict[str, str]]] = {
         '2003': {'rgb': 'data_2003/aerial_rgb_2003_2007.tif'},
         '2013': {
@@ -255,6 +270,10 @@ class HabitAlp2(GeoDataset):
         Raises:
             AssertionError: if ``year`` or ``bands`` arguments are invalid
             DatasetNotFoundError: If dataset is not found and *download* is False.
+
+        Note:
+            The year parameter is converted to string to handle YAML configs that may
+            parse numeric years (e.g., 2013) as integers instead of strings.
         """
         year = str(year)
         assert year in self.valid_years, f'year must be one of {self.valid_years}'
@@ -304,21 +323,7 @@ class HabitAlp2(GeoDataset):
             )
             image_datasets.append(cir_ds)
 
-        terrain_bands = [
-            'dtm',
-            'dsm',
-            'ndsm',
-            'slope',
-            'aspect',
-            'curvature',
-            'planform_curvature',
-            'profile_curvature',
-            'roughness_terrain',
-            'roughness_canopy',
-            'tpi',
-            'tri',
-        ]
-        for band in terrain_bands:
+        for band in self.terrain_bands:
             if band in self.bands and band in year_files:
                 terrain_path = os.path.join(root, year_files[band])
                 terrain_ds = HabitAlp2Terrain(
@@ -397,21 +402,7 @@ class HabitAlp2(GeoDataset):
         if 'cir' in year_files:
             available.append('NIR')
 
-        terrain_bands = [
-            'dtm',
-            'dsm',
-            'ndsm',
-            'slope',
-            'aspect',
-            'curvature',
-            'planform_curvature',
-            'profile_curvature',
-            'roughness_terrain',
-            'roughness_canopy',
-            'tpi',
-            'tri',
-        ]
-        for band in terrain_bands:
+        for band in self.terrain_bands:
             if band in year_files:
                 available.append(band)
 
@@ -435,21 +426,7 @@ class HabitAlp2(GeoDataset):
         if needs_cir and 'cir' in year_files:
             paths.append(os.path.join(self.root, year_files['cir']))
 
-        terrain_bands = [
-            'dtm',
-            'dsm',
-            'ndsm',
-            'slope',
-            'aspect',
-            'curvature',
-            'planform_curvature',
-            'profile_curvature',
-            'roughness_terrain',
-            'roughness_canopy',
-            'tpi',
-            'tri',
-        ]
-        for band in terrain_bands:
+        for band in self.terrain_bands:
             if band in self.bands and band in year_files:
                 paths.append(os.path.join(self.root, year_files[band]))
 
@@ -511,21 +488,7 @@ class HabitAlp2(GeoDataset):
             if not os.path.exists(filepath):
                 download_url(self.url + year_files['cir'], self.root, year_files['cir'])
 
-        terrain_bands = [
-            'dtm',
-            'dsm',
-            'ndsm',
-            'slope',
-            'aspect',
-            'curvature',
-            'planform_curvature',
-            'profile_curvature',
-            'roughness_terrain',
-            'roughness_canopy',
-            'tpi',
-            'tri',
-        ]
-        for band in terrain_bands:
+        for band in self.terrain_bands:
             if band in self.bands and band in year_files:
                 filepath = os.path.join(self.root, year_files[band])
                 if not os.path.exists(filepath):
@@ -653,6 +616,20 @@ class HabitAlp2CD(GeoDataset):
 
     rgb_bands: ClassVar[tuple[str, ...]] = ('R', 'G', 'B')
 
+    terrain_bands: ClassVar[tuple[str, ...]] = HabitAlp2.terrain_bands
+
+    classes: ClassVar[tuple[str, ...]] = (
+        'Class 0',
+        'Class 1',
+        'Class 2',
+        'Class 3',
+        'Class 4',
+        'Class 5',
+        'Class 6',
+        'Class 7',
+        'Class 8',
+    )
+
     data_files: ClassVar[dict[str, dict[str, str]]] = HabitAlp2.data_files
 
     change_mask_files: ClassVar[dict[str, str]] = {
@@ -691,9 +668,14 @@ class HabitAlp2CD(GeoDataset):
         Raises:
             AssertionError: if ``pair`` or ``bands`` arguments are invalid
             DatasetNotFoundError: If dataset is not found and *download* is False.
+
+        Note:
+            The pair parameter is converted to string to handle YAML configs that may
+            parse year pairs (e.g., 2013_2020) as integers (20132020) instead of strings.
+            The underscore is reconstructed if needed for 8-digit integers.
         """
         pair = str(pair)
-        if '_' not in pair and len(pair) == 8:
+        if '_' not in pair and len(pair) == 8 and pair.isdigit():
             pair = f'{pair[:4]}_{pair[4:]}'
         assert pair in self.valid_pairs, f'pair must be one of {self.valid_pairs}'
 
@@ -770,21 +752,7 @@ class HabitAlp2CD(GeoDataset):
             )
             image_datasets.append(cir_ds)
 
-        terrain_bands = [
-            'dtm',
-            'dsm',
-            'ndsm',
-            'slope',
-            'aspect',
-            'curvature',
-            'planform_curvature',
-            'profile_curvature',
-            'roughness_terrain',
-            'roughness_canopy',
-            'tpi',
-            'tri',
-        ]
-        for band in terrain_bands:
+        for band in self.terrain_bands:
             if band in self.bands and band in year_files:
                 terrain_path = os.path.join(self.root, year_files[band])
                 terrain_ds = HabitAlp2Terrain(
@@ -863,21 +831,7 @@ class HabitAlp2CD(GeoDataset):
         if 'cir' in year_files:
             available.append('NIR')
 
-        terrain_bands = [
-            'dtm',
-            'dsm',
-            'ndsm',
-            'slope',
-            'aspect',
-            'curvature',
-            'planform_curvature',
-            'profile_curvature',
-            'roughness_terrain',
-            'roughness_canopy',
-            'tpi',
-            'tri',
-        ]
-        for band in terrain_bands:
+        for band in self.terrain_bands:
             if band in year_files:
                 available.append(band)
 
@@ -903,21 +857,7 @@ class HabitAlp2CD(GeoDataset):
             if needs_cir and 'cir' in year_files:
                 paths.append(os.path.join(self.root, year_files['cir']))
 
-            terrain_bands = [
-                'dtm',
-                'dsm',
-                'ndsm',
-                'slope',
-                'aspect',
-                'curvature',
-                'planform_curvature',
-                'profile_curvature',
-                'roughness_terrain',
-                'roughness_canopy',
-                'tpi',
-                'tri',
-            ]
-            for band in terrain_bands:
+            for band in self.terrain_bands:
                 if band in self.bands and band in year_files:
                     paths.append(os.path.join(self.root, year_files[band]))
 
@@ -1006,21 +946,7 @@ class HabitAlp2CD(GeoDataset):
                         self.url + year_files['cir'], self.root, year_files['cir']
                     )
 
-            terrain_bands = [
-                'dtm',
-                'dsm',
-                'ndsm',
-                'slope',
-                'aspect',
-                'curvature',
-                'planform_curvature',
-                'profile_curvature',
-                'roughness_terrain',
-                'roughness_canopy',
-                'tpi',
-                'tri',
-            ]
-            for band in terrain_bands:
+            for band in self.terrain_bands:
                 if band in self.bands and band in year_files:
                     filepath = os.path.join(self.root, year_files[band])
                     if not os.path.exists(filepath):
