@@ -256,6 +256,7 @@ class HabitAlp2(GeoDataset):
             AssertionError: if ``year`` or ``bands`` arguments are invalid
             DatasetNotFoundError: If dataset is not found and *download* is False.
         """
+        year = str(year)
         assert year in self.valid_years, f'year must be one of {self.valid_years}'
 
         super().__init__()
@@ -691,6 +692,9 @@ class HabitAlp2CD(GeoDataset):
             AssertionError: if ``pair`` or ``bands`` arguments are invalid
             DatasetNotFoundError: If dataset is not found and *download* is False.
         """
+        pair = str(pair)
+        if '_' not in pair and len(pair) == 8:
+            pair = f'{pair[:4]}_{pair[4:]}'
         assert pair in self.valid_pairs, f'pair must be one of {self.valid_pairs}'
 
         super().__init__()
@@ -949,8 +953,8 @@ class HabitAlp2CD(GeoDataset):
         sample: dict[str, Any] = {
             'image': image,
             'mask': mask,
-            'crs': sample1['crs'],
-            'bounds': sample1['bounds'],
+            'crs': self.crs,
+            'bounds': self._slice_to_tensor(query),
         }
 
         if self.transforms is not None:

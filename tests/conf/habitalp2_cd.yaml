@@ -1,0 +1,19 @@
+model:
+  class_path: ChangeDetectionTask
+  init_args:
+    model: 'unet'
+    backbone: 'resnet18'
+    in_channels: 3
+    loss: 'bce'
+    ignore_index: 255
+data:
+  class_path: HabitAlp2DataModule
+  init_args:
+    batch_size: 2
+    patch_size: 32
+    length: 10
+    task: 'change_detection'
+  dict_kwargs:
+    root: '/home/hkristen/torchgeo/data/habitalp2'
+    pair: '2013_2020'
+    bands: ['R', 'G', 'B']

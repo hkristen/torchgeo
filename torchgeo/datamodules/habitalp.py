@@ -6,10 +6,9 @@
 from typing import Any, cast
 
 import kornia.augmentation as K
-import torch
 from kornia.constants import DataKey, Resample
 
-from ..datasets import GeoDataset, HabitAlp2, HabitAlp2CD, random_bbox_assignment
+from ..datasets import GeoDataset, HabitAlp2, HabitAlp2CD
 from ..samplers import GridGeoSampler, RandomBatchGeoSampler
 from ..samplers.utils import _to_tuple
 from .geo import GeoDataModule
@@ -74,12 +73,7 @@ class HabitAlp2DataModule(GeoDataModule):
             )
         else:
             self.train_aug = K.AugmentationSequential(
-                K.VideoSequential(
-                    K.Normalize(mean=self.mean, std=self.std),
-                    K.RandomResizedCrop(_to_tuple(self.patch_size), scale=(0.6, 1.0)),
-                    K.RandomVerticalFlip(p=0.5),
-                    K.RandomHorizontalFlip(p=0.5),
-                ),
+                K.VideoSequential(K.Normalize(mean=self.mean, std=self.std)),
                 data_keys=None,
                 keepdim=True,
             )
@@ -97,10 +91,9 @@ class HabitAlp2DataModule(GeoDataModule):
             stage: Either 'fit', 'validate', 'test', or 'predict'.
         """
         dataset = cast(GeoDataset, self.dataset_class(**self.kwargs))
-        generator = torch.Generator().manual_seed(0)
-        (self.train_dataset, self.val_dataset, self.test_dataset) = (
-            random_bbox_assignment(dataset, [0.6, 0.2, 0.2], generator)
-        )
+        self.train_dataset = dataset
+        self.val_dataset = dataset
+        self.test_dataset = dataset
 
         if stage in ['fit']:
             self.train_batch_sampler = RandomBatchGeoSampler(
@@ -114,3 +107,30 @@ class HabitAlp2DataModule(GeoDataModule):
             self.test_sampler = GridGeoSampler(
                 self.test_dataset, self.patch_size, self.patch_size
             )
+
+    def on_after_batch_transfer(
+        self, batch: dict[str, Any], dataloader_idx: int
+    ) -> dict[str, Any]:
+        """Apply augmentations after batch transfer to device.
+
+        For change detection, handles mask separately since VideoSequential
+        only works with image tensor (T, C, H, W).
+
+        Args:
+            batch: A batch of data.
+            dataloader_idx: Index of the dataloader.
+
+        Returns:
+            Augmented batch.
+        """
+        if self.task == 'segmentation':
+            return super().on_after_batch_transfer(batch, dataloader_idx)
+
+        if self.trainer:
+            aug = self.train_aug if self.trainer.training else self.aug
+            if aug is not None:
+                mask = batch.pop('mask')
+                batch = aug(batch)
+                batch['mask'] = mask
+
+        return batch
