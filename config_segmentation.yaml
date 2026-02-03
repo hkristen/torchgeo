@@ -1,0 +1,21 @@
+model:
+  class_path: torchgeo.trainers.SemanticSegmentationTask
+  init_args:
+    model: 'unet'
+    backbone: 'resnet50'
+    in_channels: 4  # RGB + NIR
+    num_classes: 24  # 23 classes + background
+    loss: 'ce'
+    ignore_index: 0
+
+data:
+  class_path: torchgeo.datamodules.HabitAlp2DataModule
+  init_args:
+    batch_size: 16
+    patch_size: 256
+    length: 2000
+    task: 'segmentation'
+  dict_kwargs:
+    root: '/path/to/data'
+    year: '2013'
+    bands: ['R', 'G', 'B', 'NIR']

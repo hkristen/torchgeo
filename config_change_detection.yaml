@@ -1,0 +1,22 @@
+model:
+  class_path: torchgeo.trainers.ChangeDetectionTask
+  init_args:
+    model: 'unet'
+    backbone: 'resnet18'
+    in_channels: 3
+    task: 'multiclass'
+    num_classes: 9  # 9 change classes
+    loss: 'ce'
+    ignore_index: 255
+
+data:
+  class_path: torchgeo.datamodules.HabitAlp2DataModule
+  init_args:
+    batch_size: 8
+    patch_size: 256
+    length: 1000
+    task: 'change_detection'
+  dict_kwargs:
+    root: '/path/to/data'
+    pair: '2013_2020'
+    bands: ['R', 'G', 'B']
